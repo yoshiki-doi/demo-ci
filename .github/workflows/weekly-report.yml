@@ -95,10 +95,14 @@ jobs:
           if [ -z "$KEY" ]; then echo "::error::ANTHROPIC_API_KEY is empty or not set"; exit 1; fi
           ws=no; case "$KEY" in *[[:space:]]*) ws=yes ;; esac
           echo "length=${#KEY} prefix=${KEY:0:7} whitespace_inside=$ws"
-          code=$(curl -s -o /dev/null -w '%{http_code}' https://api.anthropic.com/v1/models \
+          code=$(curl -s -o /tmp/anthropic-check.json -w '%{http_code}' https://api.anthropic.com/v1/models \
             -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01")
           echo "Anthropic API status: $code"
-          [ "$code" = "200" ] || { echo "::error::ANTHROPIC_API_KEY was rejected (HTTP $code)"; exit 1; }
+          if [ "$code" != "200" ]; then
+            # The error body holds only the error type and message (no secrets).
+            echo "Anthropic API error: $(jq -r '.error | "\(.type): \(.message)"' /tmp/anthropic-check.json 2>/dev/null | cut -c1-300)"
+            echo "::error::ANTHROPIC_API_KEY was rejected (HTTP $code)"; exit 1
+          fi
 
       - name: Generate report with Claude Code
         if: ${{ !inputs.use-skills }}
