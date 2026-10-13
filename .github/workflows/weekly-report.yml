@@ -169,7 +169,7 @@ jobs:
       # TEMPORARY bisect: which part of the skills mode triggers "credit balance is too low"?
       - name: Bisect N (action, nothing extra)
         id: vn
-        if: ${{ inputs.use-skills }}
+        if: ${{ always() && inputs.use-skills }}
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
@@ -181,7 +181,7 @@ jobs:
             --max-turns 1
       - name: Bisect P (action, plugin only)
         id: vp
-        if: ${{ inputs.use-skills }}
+        if: ${{ always() && inputs.use-skills }}
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
@@ -195,7 +195,7 @@ jobs:
             --max-turns 1
       - name: Bisect M (action, hosted MCP only)
         id: vm
-        if: ${{ inputs.use-skills }}
+        if: ${{ always() && inputs.use-skills }}
         continue-on-error: true
         uses: anthropics/claude-code-action@v1
         with:
