@@ -166,6 +166,53 @@ jobs:
             --allowedTools "Skill,Read,Write,Glob,mcp__secure-mcp-server__list_zones,mcp__secure-mcp-server__query_vulnerability_findings,mcp__secure-mcp-server__list_scope_labels,mcp__secure-mcp-server__list_scope_label_values,mcp__secure-mcp-server__get_customer_settings,mcp__secure-mcp-server__list_runtime_scan_results,mcp__secure-mcp-server__run_sysql"
             --disallowedTools "mcp__secure-mcp-server__create_team,mcp__secure-mcp-server__update_team,mcp__secure-mcp-server__delete_team,mcp__secure-mcp-server__save_team_membership,mcp__secure-mcp-server__create_user,mcp__secure-mcp-server__update_user,mcp__secure-mcp-server__delete_user,mcp__secure-mcp-server__close_job,mcp__secure-mcp-server__create_artifact,mcp__secure-mcp-server__save_plan_report,mcp__secure-mcp-server__save_skill_state,mcp__secure-mcp-server__delete_skill_state,mcp__secure-mcp-server__set_zone_posture_policies,mcp__secure-mcp-server__create_vulnerability_policy,mcp__secure-mcp-server__update_vulnerability_policy,mcp__secure-mcp-server__delete_vulnerability_policy,mcp__secure-mcp-server__update_runtime_policy,mcp__secure-mcp-server__submit_response_action,mcp__secure-mcp-server__undo_response_action"
 
+      # TEMPORARY bisect: which part of the skills mode triggers "credit balance is too low"?
+      - name: Bisect N (action, nothing extra)
+        id: vn
+        if: ${{ inputs.use-skills }}
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: "Reply with one word."
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 1
+      - name: Bisect P (action, plugin only)
+        id: vp
+        if: ${{ inputs.use-skills }}
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          plugin_marketplaces: "https://github.com/sysdig/skills.git"
+          plugins: "headless-cloud-security@sysdig-skills"
+          prompt: "Reply with one word."
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 1
+      - name: Bisect M (action, hosted MCP only)
+        id: vm
+        if: ${{ inputs.use-skills }}
+        continue-on-error: true
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: "Reply with one word."
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 1
+            --mcp-config .ci/sysdig-mcp-hosted.json
+      - name: Bisect result
+        if: ${{ always() && inputs.use-skills }}
+        run: |
+          echo "BISECT N (nothing extra): ${{ steps.vn.outcome }}"
+          echo "BISECT P (plugin only):   ${{ steps.vp.outcome }}"
+          echo "BISECT M (hosted MCP):    ${{ steps.vm.outcome }}"
+
       # TEMPORARY diagnosis: run the Claude Code CLI directly with the same key (the action installs it).
       - name: Diagnose Claude Code CLI (temporary)
         if: ${{ always() && inputs.use-skills }}
