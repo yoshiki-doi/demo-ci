@@ -166,6 +166,25 @@ jobs:
             --allowedTools "Skill,Read,Write,Glob,mcp__secure-mcp-server__list_zones,mcp__secure-mcp-server__query_vulnerability_findings,mcp__secure-mcp-server__list_scope_labels,mcp__secure-mcp-server__list_scope_label_values,mcp__secure-mcp-server__get_customer_settings,mcp__secure-mcp-server__list_runtime_scan_results,mcp__secure-mcp-server__run_sysql"
             --disallowedTools "mcp__secure-mcp-server__create_team,mcp__secure-mcp-server__update_team,mcp__secure-mcp-server__delete_team,mcp__secure-mcp-server__save_team_membership,mcp__secure-mcp-server__create_user,mcp__secure-mcp-server__update_user,mcp__secure-mcp-server__delete_user,mcp__secure-mcp-server__close_job,mcp__secure-mcp-server__create_artifact,mcp__secure-mcp-server__save_plan_report,mcp__secure-mcp-server__save_skill_state,mcp__secure-mcp-server__delete_skill_state,mcp__secure-mcp-server__set_zone_posture_policies,mcp__secure-mcp-server__create_vulnerability_policy,mcp__secure-mcp-server__update_vulnerability_policy,mcp__secure-mcp-server__delete_vulnerability_policy,mcp__secure-mcp-server__update_runtime_policy,mcp__secure-mcp-server__submit_response_action,mcp__secure-mcp-server__undo_response_action"
 
+      # TEMPORARY diagnosis: run the Claude Code CLI directly with the same key (the action installs it).
+      - name: Diagnose Claude Code CLI (temporary)
+        if: ${{ always() && inputs.use-skills }}
+        continue-on-error: true
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          export PATH="$HOME/.local/bin:$PATH"
+          command -v claude || { echo "claude CLI not found"; exit 0; }
+          claude --version
+          for m in claude-sonnet-5-5 claude-haiku-4-5-20251001; do
+            echo "--- model $m"
+            claude -p "Reply with one word." --model "$m" --max-turns 1 --output-format json 2>&1 \
+              | sed -E 's/sk-ant-[A-Za-z0-9_-]+/sk-ant-***/g' | jq -c '{is_error, result, total_cost_usd, apiKeySource: .apiKeySource}' 2>/dev/null || true
+          done
+          echo "--- debug api (filtered, masked)"
+          claude -p "Reply with one word." --model claude-sonnet-5-5 --max-turns 1 --debug api 2>&1 \
+            | sed -E 's/sk-ant-[A-Za-z0-9_-]+/sk-ant-***/g' | grep -iE 'credit|error|status|organization|beta|retry|HTTP' | cut -c1-260 | head -30 || true
+
       - name: Publish report
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
