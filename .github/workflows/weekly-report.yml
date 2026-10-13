@@ -118,6 +118,23 @@ jobs:
           done
           [ "${failed:-0}" = "0" ] || { echo "::error::A test message with the report model failed (see above)"; exit 1; }
 
+      # TEMPORARY diagnosis: which kind of request is refused with "credit balance is too low"?
+      - name: Diagnose request sizes (temporary)
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          call() { # label, json body
+            code=$(curl -s -o /tmp/d.json -w '%{http_code}' https://api.anthropic.com/v1/messages \
+              -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" -d "$2")
+            echo "$1: HTTP $code $(jq -r 'if .error then "\(.error.type): \(.error.message)" else "input_tokens=\(.usage.input_tokens) output_tokens=\(.usage.output_tokens)" end' /tmp/d.json | cut -c1-200)"
+          }
+          call "A) max_tokens=32000, tiny prompt" '{"model":"claude-sonnet-5-5","max_tokens":32000,"messages":[{"role":"user","content":"Reply with one word."}]}'
+          big=$(python3 -c "print('The quick brown fox jumps over the lazy dog. ' * 2200)")
+          body=$(jq -nc --arg t "$big" '{model:"claude-sonnet-5-5",max_tokens:8,messages:[{role:"user",content:($t + "\nReply with one word.")}]}')
+          call "B) ~22k input tokens, max_tokens=8" "$body"
+          call "C) max_tokens=64000, tiny prompt" '{"model":"claude-sonnet-5-5","max_tokens":64000,"messages":[{"role":"user","content":"Reply with one word."}]}'
+        continue-on-error: true
+
       - name: Generate report with Claude Code
         if: ${{ !inputs.use-skills }}
         uses: anthropics/claude-code-action@v1
