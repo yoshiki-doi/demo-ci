@@ -118,23 +118,6 @@ jobs:
           done
           [ "${failed:-0}" = "0" ] || { echo "::error::A test message with the report model failed (see above)"; exit 1; }
 
-      # TEMPORARY diagnosis: which kind of request is refused with "credit balance is too low"?
-      - name: Diagnose request sizes (temporary)
-        env:
-          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          call() { # label, json body
-            code=$(curl -s -o /tmp/d.json -w '%{http_code}' https://api.anthropic.com/v1/messages \
-              -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" -d "$2")
-            echo "$1: HTTP $code $(jq -r 'if .error then "\(.error.type): \(.error.message)" else "input_tokens=\(.usage.input_tokens) output_tokens=\(.usage.output_tokens)" end' /tmp/d.json | cut -c1-200)"
-          }
-          call "A) max_tokens=32000, tiny prompt" '{"model":"claude-sonnet-5-5","max_tokens":32000,"messages":[{"role":"user","content":"Reply with one word."}]}'
-          big=$(python3 -c "print('The quick brown fox jumps over the lazy dog. ' * 2200)")
-          body=$(jq -nc --arg t "$big" '{model:"claude-sonnet-5-5",max_tokens:8,messages:[{role:"user",content:($t + "\nReply with one word.")}]}')
-          call "B) ~22k input tokens, max_tokens=8" "$body"
-          call "C) max_tokens=64000, tiny prompt" '{"model":"claude-sonnet-5-5","max_tokens":64000,"messages":[{"role":"user","content":"Reply with one word."}]}'
-        continue-on-error: true
-
       - name: Generate report with Claude Code
         if: ${{ !inputs.use-skills }}
         uses: anthropics/claude-code-action@v1
@@ -148,91 +131,38 @@ jobs:
             --mcp-config .ci/sysdig-mcp.json
             --allowedTools "mcp__secure-mcp-server__list_zones,mcp__secure-mcp-server__list_runtime_scan_results,mcp__secure-mcp-server__count_runtime_events,mcp__secure-mcp-server__discover_runtime_event_field_values,Read,Write"
 
-      # Skills mode (vulnerability report with sysdig-investigate): the hosted Sysdig MCP server accepts the team
-      # service account key as a Bearer token, so no OAuth login is needed. Only a small read-only tool list is allowed.
-      - name: Generate report with Claude Code (Sysdig skills)
+      # Skills mode (vulnerability report with sysdig-investigate). The Claude Code CLI is run directly:
+      # claude-code-action failed with "Credit balance is too low" while the same key worked with the CLI.
+      # The hosted Sysdig MCP server accepts the team service account key as a Bearer token (no OAuth login),
+      # and only a short read-only tool list is allowed.
+      - name: Install Claude Code CLI and the Sysdig skills
         if: ${{ inputs.use-skills }}
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}
-          plugin_marketplaces: "https://github.com/sysdig/skills.git"
-          plugins: "headless-cloud-security@sysdig-skills"
-          prompt: ${{ steps.prompt.outputs.prompt }}
-          claude_args: |
-            --model claude-sonnet-5-5
-            --max-turns 60
-            --mcp-config .ci/sysdig-mcp-hosted.json
-            --allowedTools "Skill,Read,Write,Glob,mcp__secure-mcp-server__list_zones,mcp__secure-mcp-server__query_vulnerability_findings,mcp__secure-mcp-server__list_scope_labels,mcp__secure-mcp-server__list_scope_label_values,mcp__secure-mcp-server__get_customer_settings,mcp__secure-mcp-server__list_runtime_scan_results,mcp__secure-mcp-server__run_sysql"
-            --disallowedTools "mcp__secure-mcp-server__create_team,mcp__secure-mcp-server__update_team,mcp__secure-mcp-server__delete_team,mcp__secure-mcp-server__save_team_membership,mcp__secure-mcp-server__create_user,mcp__secure-mcp-server__update_user,mcp__secure-mcp-server__delete_user,mcp__secure-mcp-server__close_job,mcp__secure-mcp-server__create_artifact,mcp__secure-mcp-server__save_plan_report,mcp__secure-mcp-server__save_skill_state,mcp__secure-mcp-server__delete_skill_state,mcp__secure-mcp-server__set_zone_posture_policies,mcp__secure-mcp-server__create_vulnerability_policy,mcp__secure-mcp-server__update_vulnerability_policy,mcp__secure-mcp-server__delete_vulnerability_policy,mcp__secure-mcp-server__update_runtime_policy,mcp__secure-mcp-server__submit_response_action,mcp__secure-mcp-server__undo_response_action"
-
-      # TEMPORARY bisect: which part of the skills mode triggers "credit balance is too low"?
-      - name: Bisect N (action, nothing extra)
-        id: vn
-        if: ${{ always() && inputs.use-skills }}
-        continue-on-error: true
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}
-          prompt: "Reply with one word."
-          show_full_output: true
-          claude_args: |
-            --model claude-sonnet-5-5
-            --max-turns 1
-            --debug api
-      - name: Bisect P (action, plugin only)
-        id: vp
-        if: ${{ always() && inputs.use-skills }}
-        continue-on-error: true
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}
-          plugin_marketplaces: "https://github.com/sysdig/skills.git"
-          plugins: "headless-cloud-security@sysdig-skills"
-          prompt: "Reply with one word."
-          claude_args: |
-            --model claude-sonnet-5-5
-            --max-turns 1
-      - name: Bisect M (action, hosted MCP only)
-        id: vm
-        if: ${{ always() && inputs.use-skills }}
-        continue-on-error: true
-        uses: anthropics/claude-code-action@v1
-        with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ github.token }}
-          prompt: "Reply with one word."
-          claude_args: |
-            --model claude-sonnet-5-5
-            --max-turns 1
-            --mcp-config .ci/sysdig-mcp-hosted.json
-      - name: Bisect result
-        if: ${{ always() && inputs.use-skills }}
         run: |
-          echo "BISECT N (nothing extra): ${{ steps.vn.outcome }}"
-          echo "BISECT P (plugin only):   ${{ steps.vp.outcome }}"
-          echo "BISECT M (hosted MCP):    ${{ steps.vm.outcome }}"
+          set -euo pipefail
+          npm install -g @anthropic-ai/claude-code
+          claude --version
+          claude plugin marketplace add sysdig/skills
+          claude plugin install headless-cloud-security@sysdig-skills
+          claude plugin list
 
-      # TEMPORARY diagnosis: run the Claude Code CLI directly with the same key (the action installs it).
-      - name: Diagnose Claude Code CLI (temporary)
-        if: ${{ always() && inputs.use-skills }}
-        continue-on-error: true
+      - name: Generate report with Claude Code CLI (Sysdig skills)
+        if: ${{ inputs.use-skills }}
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          REPORT_PROMPT: ${{ steps.prompt.outputs.prompt }}
         run: |
-          export PATH="$HOME/.local/bin:$PATH"
-          command -v claude || { echo "claude CLI not found"; exit 0; }
-          claude --version
-          for m in claude-sonnet-5-5 claude-haiku-4-5-20251001; do
-            echo "--- model $m"
-            claude -p "Reply with one word." --model "$m" --max-turns 1 --output-format json 2>&1 \
-              | sed -E 's/sk-ant-[A-Za-z0-9_-]+/sk-ant-***/g' | jq -c '{is_error, result, total_cost_usd, apiKeySource: .apiKeySource}' 2>/dev/null || true
-          done
-          echo "--- debug api (filtered, masked)"
-          claude -p "Reply with one word." --model claude-sonnet-5-5 --max-turns 1 --debug api 2>&1 \
-            | sed -E 's/sk-ant-[A-Za-z0-9_-]+/sk-ant-***/g' | grep -iE 'credit|error|status|organization|beta|retry|HTTP' | cut -c1-260 | head -30 || true
+          set -euo pipefail
+          allowed="Skill,Read,Write,Glob,mcp__secure-mcp-server__list_zones,mcp__secure-mcp-server__query_vulnerability_findings,mcp__secure-mcp-server__list_scope_labels,mcp__secure-mcp-server__list_scope_label_values,mcp__secure-mcp-server__get_customer_settings,mcp__secure-mcp-server__list_runtime_scan_results,mcp__secure-mcp-server__run_sysql"
+          denied="mcp__secure-mcp-server__create_team,mcp__secure-mcp-server__update_team,mcp__secure-mcp-server__delete_team,mcp__secure-mcp-server__save_team_membership,mcp__secure-mcp-server__create_user,mcp__secure-mcp-server__update_user,mcp__secure-mcp-server__delete_user,mcp__secure-mcp-server__close_job,mcp__secure-mcp-server__create_artifact,mcp__secure-mcp-server__save_plan_report,mcp__secure-mcp-server__save_skill_state,mcp__secure-mcp-server__delete_skill_state,mcp__secure-mcp-server__set_zone_posture_policies,mcp__secure-mcp-server__create_vulnerability_policy,mcp__secure-mcp-server__update_vulnerability_policy,mcp__secure-mcp-server__delete_vulnerability_policy,mcp__secure-mcp-server__update_runtime_policy,mcp__secure-mcp-server__submit_response_action,mcp__secure-mcp-server__undo_response_action"
+          claude -p "$REPORT_PROMPT" \
+            --model claude-sonnet-5-5 \
+            --max-turns 60 \
+            --mcp-config .ci/sysdig-mcp-hosted.json --strict-mcp-config \
+            --allowedTools "$allowed" \
+            --disallowedTools "$denied" \
+            --output-format json > claude-result.json
+          jq '{is_error, subtype, num_turns, duration_ms, total_cost_usd, result: (.result // "" | .[0:300])}' claude-result.json
+          [ "$(jq -r '.is_error' claude-result.json)" = "false" ] || { echo "::error::Claude Code reported an error (see the result above)"; exit 1; }
 
       - name: Publish report
         env:
@@ -254,5 +184,6 @@ jobs:
           path: |
             report.md
             github-data.json
+            claude-result.json
             ${{ runner.temp }}/claude-execution-output.json
           if-no-files-found: ignore
