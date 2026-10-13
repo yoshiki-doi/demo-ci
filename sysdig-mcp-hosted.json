@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "secure-mcp-server": {
+      "type": "http",
+      "url": "https://app.au1.sysdig.com/mcp/secure",
+      "headers": {
+        "Authorization": "Bearer ${SYSDIG_SECURE_API_TOKEN}"
+      }
+    }
+  }
+}

@@ -13,6 +13,10 @@ on:
       sysdig-url:
         type: string
         default: https://app.au1.sysdig.com   # AU1 region
+      use-skills:
+        description: Use the Sysdig Headless Cloud Security skills (sysdig/skills) through the hosted Sysdig MCP server
+        type: boolean
+        default: false
     secrets:
       ANTHROPIC_API_KEY:
         required: true
@@ -24,7 +28,7 @@ on:
 jobs:
   report:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     # The caller must grant at least these permissions.
     permissions:
       contents: read
@@ -65,12 +69,13 @@ jobs:
         env:
           BIZ: ${{ inputs.biz }}
           REPO: ${{ github.repository }}
+          PROMPT_FILE: ${{ inputs.use-skills && 'weekly-report-skills.prompt.md' || 'weekly-report.prompt.md' }}
         run: |
           set -euo pipefail
           upper=$(printf '%s' "$BIZ" | tr '[:lower:]' '[:upper:]')
           {
             echo "prompt<<PROMPT_EOF"
-            sed -e "s/{BIZ大文字}/$upper/g" -e "s/{BIZ}/$BIZ/g" -e "s#yoshiki-doi/demo-biz-$BIZ#$REPO#g" .ci/reports/weekly-report.prompt.md
+            sed -e "s/{BIZ大文字}/$upper/g" -e "s/{BIZ}/$BIZ/g" -e "s#yoshiki-doi/demo-biz-$BIZ#$REPO#g" ".ci/reports/$PROMPT_FILE"
             cat <<'ADDENDUM'
 
           ## 実行環境の指定（GitHub Actions）
@@ -96,6 +101,7 @@ jobs:
           [ "$code" = "200" ] || { echo "::error::ANTHROPIC_API_KEY was rejected (HTTP $code)"; exit 1; }
 
       - name: Generate report with Claude Code
+        if: ${{ !inputs.use-skills }}
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -106,6 +112,24 @@ jobs:
             --max-turns 25
             --mcp-config .ci/sysdig-mcp.json
             --allowedTools "mcp__secure-mcp-server__list_zones,mcp__secure-mcp-server__list_runtime_scan_results,mcp__secure-mcp-server__count_runtime_events,mcp__secure-mcp-server__discover_runtime_event_field_values,Read,Write"
+
+      # Skills mode: the hosted Sysdig MCP server accepts the team service account key as a Bearer token,
+      # so no OAuth login is needed. Everything except the read tools is blocked.
+      - name: Generate report with Claude Code (Sysdig skills)
+        if: ${{ inputs.use-skills }}
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          plugin_marketplaces: "https://github.com/sysdig/skills.git"
+          plugins: "headless-cloud-security@sysdig-skills"
+          prompt: ${{ steps.prompt.outputs.prompt }}
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 60
+            --mcp-config .ci/sysdig-mcp-hosted.json
+            --allowedTools "mcp__secure-mcp-server,Skill,Read,Write,Glob"
+            --disallowedTools "mcp__secure-mcp-server__create_team,mcp__secure-mcp-server__update_team,mcp__secure-mcp-server__delete_team,mcp__secure-mcp-server__save_team_membership,mcp__secure-mcp-server__create_user,mcp__secure-mcp-server__update_user,mcp__secure-mcp-server__delete_user,mcp__secure-mcp-server__close_job,mcp__secure-mcp-server__create_artifact,mcp__secure-mcp-server__save_plan_report,mcp__secure-mcp-server__save_skill_state,mcp__secure-mcp-server__delete_skill_state,mcp__secure-mcp-server__set_zone_posture_policies,mcp__secure-mcp-server__create_vulnerability_policy,mcp__secure-mcp-server__update_vulnerability_policy,mcp__secure-mcp-server__delete_vulnerability_policy,mcp__secure-mcp-server__update_runtime_policy,mcp__secure-mcp-server__submit_response_action,mcp__secure-mcp-server__undo_response_action"
 
       - name: Publish report
         env:
