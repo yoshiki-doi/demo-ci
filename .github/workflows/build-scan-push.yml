@@ -20,6 +20,18 @@ on:
         description: Upload the SARIF report to GitHub code scanning (needs code scanning enabled on the repo)
         type: boolean
         default: false
+      sarif-severity-at-least:
+        description: Only report vulnerabilities with at least this severity in the SARIF report (critical, high, medium, low, negligible, any)
+        type: string
+        default: high
+      sarif-group-by-package:
+        description: Group vulnerabilities by package in the SARIF report (one code scanning alert per package)
+        type: boolean
+        default: true
+      sarif-exclude-accepted:
+        description: Leave out vulnerabilities whose risk is accepted in Sysdig
+        type: boolean
+        default: true
     secrets:
       SECURE_API_TOKEN:
         required: true
@@ -46,6 +58,10 @@ jobs:
           sysdig-secure-url: ${{ inputs.secure-api-url }}
           stop-on-failed-policy-eval: ${{ inputs.stop-on-failed-policy-eval }}
           stop-on-processing-error: true   # operational errors (bad token, network) always fail the job
+          # These shape the SARIF report only; the policy evaluation above is unaffected.
+          severity-at-least: ${{ inputs.sarif-severity-at-least }}
+          group-by-package: ${{ inputs.sarif-group-by-package }}
+          exclude-accepted: ${{ inputs.sarif-exclude-accepted }}
       - uses: actions/upload-artifact@v4
         if: success() || failure()
         with: {name: sysdig-scan, path: sarif.json, if-no-files-found: ignore}

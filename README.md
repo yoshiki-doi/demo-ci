@@ -14,3 +14,15 @@ jobs:
     secrets:
       SECURE_API_TOKEN: ${{ secrets.SECURE_API_TOKEN }}
 ```
+
+## SARIF / code scanning
+
+With `upload-sarif: true` the Sysdig report is uploaded to GitHub code scanning. To keep the alert list manageable:
+
+| input | default | effect |
+|---|---|---|
+| `sarif-severity-at-least` | `high` | only report this severity and above |
+| `sarif-group-by-package` | `true` | one alert per package instead of one per CVE |
+| `sarif-exclude-accepted` | `true` | skip risks accepted in Sysdig |
+
+These only shape the SARIF report; `stop-on-failed-policy-eval` still follows the Sysdig policy.
