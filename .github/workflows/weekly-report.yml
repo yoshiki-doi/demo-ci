@@ -103,6 +103,20 @@ jobs:
             echo "Anthropic API error: $(jq -r '.error | "\(.type): \(.message)"' /tmp/anthropic-check.json 2>/dev/null | cut -c1-300)"
             echo "::error::ANTHROPIC_API_KEY was rejected (HTTP $code)"; exit 1
           fi
+          # A valid key can still be out of credit. Send a tiny message (8 tokens) with the report model and a small
+          # model, and show the status, the error text and the organization the request was billed to.
+          for model in claude-sonnet-5-5 claude-haiku-4-5-20251001; do
+            code=$(curl -s -D /tmp/anthropic-headers.txt -o /tmp/anthropic-msg.json -w '%{http_code}' https://api.anthropic.com/v1/messages \
+              -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" -H "content-type: application/json" \
+              -d "{\"model\":\"$model\",\"max_tokens\":8,\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}]}")
+            org=$(tr -d '\r' < /tmp/anthropic-headers.txt | awk -F': ' 'tolower($1)=="anthropic-organization-id"{print $2}')
+            echo "messages $model: HTTP $code, organization_id=${org:-n/a}"
+            if [ "$code" != "200" ]; then
+              echo "  error: $(jq -r '.error | "\(.type): \(.message)"' /tmp/anthropic-msg.json 2>/dev/null | cut -c1-300)"
+              [ "$model" = "claude-sonnet-5-5" ] && failed=1
+            fi
+          done
+          [ "${failed:-0}" = "0" ] || { echo "::error::A test message with the report model failed (see above)"; exit 1; }
 
       - name: Generate report with Claude Code
         if: ${{ !inputs.use-skills }}
