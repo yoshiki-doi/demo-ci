@@ -22,7 +22,8 @@ With `upload-sarif: true` the Sysdig report is uploaded to GitHub code scanning.
 | input | default | effect |
 |---|---|---|
 | `sarif-severity-at-least` | `high` | only report this severity and above |
-| `sarif-group-by-package` | `true` | one alert per package instead of one per CVE |
+| `sarif-group-by-package` | `false` | `true` = one alert per package; `false` = one alert per CVE (default) |
 | `sarif-exclude-accepted` | `true` | skip risks accepted in Sysdig |
 
+The scan targets the `:latest` tag so the SARIF location stays stable across commits and alerts (and their dismissals) persist.
 These only shape the SARIF report; `stop-on-failed-policy-eval` still follows the Sysdig policy.

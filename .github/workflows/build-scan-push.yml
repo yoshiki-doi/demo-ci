@@ -25,9 +25,9 @@ on:
         type: string
         default: high
       sarif-group-by-package:
-        description: Group vulnerabilities by package in the SARIF report (one code scanning alert per package)
+        description: Group vulnerabilities by package in the SARIF report (one alert per package). Default false = one alert per CVE
         type: boolean
-        default: true
+        default: false
       sarif-exclude-accepted:
         description: Leave out vulnerabilities whose risk is accepted in Sysdig
         type: boolean
@@ -53,7 +53,9 @@ jobs:
       - name: Scan image
         uses: sysdiglabs/scan-action@v6
         with:
-          image-tag: ${{ env.IMAGE }}
+          # Scan the :latest tag (the same image as the sha tag). The SARIF location contains the scanned tag, so
+          # a per-commit tag would recreate every code scanning alert on each commit and lose dismissals.
+          image-tag: ${{ env.IMAGE_LATEST }}
           sysdig-secure-token: ${{ secrets.SECURE_API_TOKEN }}
           sysdig-secure-url: ${{ inputs.secure-api-url }}
           stop-on-failed-policy-eval: ${{ inputs.stop-on-failed-policy-eval }}
