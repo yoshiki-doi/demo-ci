@@ -88,6 +88,7 @@ jobs:
           github_token: ${{ github.token }}
           prompt: ${{ steps.prompt.outputs.prompt }}
           claude_args: |
+            --model claude-sonnet-5-5
             --max-turns 25
             --mcp-config .ci/sysdig-mcp.json
             --allowedTools "mcp__secure-mcp-server__list_zones,mcp__secure-mcp-server__list_runtime_scan_results,mcp__secure-mcp-server__count_runtime_events,mcp__secure-mcp-server__discover_runtime_event_field_values,Read,Write"
