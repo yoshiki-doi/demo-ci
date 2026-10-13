@@ -13,6 +13,10 @@ on:
       sysdig-url:
         type: string
         default: https://app.au1.sysdig.com   # AU1 region
+      skills-ref:
+        description: Tag (or branch) of github.com/sysdig/skills to install in skills mode
+        type: string
+        default: v0.4.1
       use-skills:
         description: Use the Sysdig Headless Cloud Security skills (sysdig/skills) through the hosted Sysdig MCP server
         type: boolean
@@ -22,8 +26,6 @@ on:
         required: true
       SYSDIG_SECURE_API_TOKEN:
         required: true
-      SLACK_WEBHOOK_URL:
-        required: false
 
 jobs:
   report:
@@ -137,11 +139,13 @@ jobs:
       # and only a short read-only tool list is allowed.
       - name: Install Claude Code CLI and the Sysdig skills
         if: ${{ inputs.use-skills }}
+        env:
+          SKILLS_REF: ${{ inputs.skills-ref }}
         run: |
           set -euo pipefail
           npm install -g @anthropic-ai/claude-code
           claude --version
-          claude plugin marketplace add sysdig/skills
+          claude plugin marketplace add "sysdig/skills#$SKILLS_REF"
           claude plugin install headless-cloud-security@sysdig-skills
           claude plugin list
 
@@ -168,17 +172,10 @@ jobs:
           [ "$(jq -r '.is_error' claude-result.json)" = "false" ] || { echo "::error::Claude Code reported an error (see the result above)"; exit 1; }
 
       - name: Publish report
-        env:
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           set -euo pipefail
           [ -s report.md ] || { echo "::error::report.md was not created"; exit 1; }
           cat report.md >> "$GITHUB_STEP_SUMMARY"
-          if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
-            .ci/reports/post-to-slack.sh report.md
-          else
-            echo "No SLACK_WEBHOOK_URL secret: skipped the Slack post"
-          fi
 
       - uses: actions/upload-artifact@v4
         if: always()
