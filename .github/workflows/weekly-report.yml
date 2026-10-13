@@ -176,9 +176,11 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           github_token: ${{ github.token }}
           prompt: "Reply with one word."
+          show_full_output: true
           claude_args: |
             --model claude-sonnet-5-5
             --max-turns 1
+            --debug api
       - name: Bisect P (action, plugin only)
         id: vp
         if: ${{ always() && inputs.use-skills }}
