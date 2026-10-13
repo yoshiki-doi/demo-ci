@@ -6,7 +6,7 @@ on:
   workflow_call:
     inputs:
       image-name:
-        description: Image repository without tag, e.g. ghcr.io/qfour/demo-biz-a
+        description: Image repository without tag, e.g. ghcr.io/yoshiki-doi/demo-biz-a
         type: string
         required: true
       stop-on-failed-policy-eval:

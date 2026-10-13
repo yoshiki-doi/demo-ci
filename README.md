@@ -6,9 +6,9 @@ Shared CI workflow for the `demo-biz-*` repositories (build, scan with Sysdig, p
 jobs:
   ci:
     permissions: {contents: read, packages: write, security-events: write}
-    uses: Qfour/demo-ci/.github/workflows/build-scan-push.yml@main
+    uses: yoshiki-doi/demo-ci/.github/workflows/build-scan-push.yml@main
     with:
-      image-name: ghcr.io/qfour/demo-biz-a
+      image-name: ghcr.io/yoshiki-doi/demo-biz-a
       stop-on-failed-policy-eval: true   # fail the job (and skip the push) on a failed Sysdig policy
       upload-sarif: false                # needs code scanning (public repo or GitHub Code Security)
     secrets:
