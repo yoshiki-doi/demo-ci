@@ -1,0 +1,116 @@
+# Weekly business report (headless): Claude Code reads Sysdig through MCP and writes one Markdown report.
+# Called from each demo-biz-* repository, so every business runs with its own secrets
+# (a Sysdig team service account key that only sees that business's zones).
+name: weekly-report
+
+on:
+  workflow_call:
+    inputs:
+      biz:
+        description: Business key (a, b or c)
+        type: string
+        required: true
+      sysdig-url:
+        type: string
+        default: https://app.au1.sysdig.com   # AU1 region
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+      SYSDIG_SECURE_API_TOKEN:
+        required: true
+      SLACK_WEBHOOK_URL:
+        required: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # The caller must grant at least these permissions.
+    permissions:
+      contents: read
+      actions: read
+      security-events: read
+    env:
+      SYSDIG_SECURE_URL: ${{ inputs.sysdig-url }}
+      SYSDIG_SECURE_API_TOKEN: ${{ secrets.SYSDIG_SECURE_API_TOKEN }}
+    steps:
+      # The called workflow's own repository is not checked out automatically; fetch the prompt and MCP config.
+      - uses: actions/checkout@v4
+        with:
+          repository: yoshiki-doi/demo-ci
+          ref: main
+          path: .ci
+
+      # CI and code scanning of this repository are collected here and handed to Claude as a file,
+      # so Claude does not need shell access.
+      - name: Collect GitHub data
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          latest_run=$(gh run list -R "$REPO" --workflow ci --limit 1 --json status,conclusion,createdAt,headSha | jq -c '.[0] // {}')
+          if cs_lines=$(gh api "repos/$REPO/code-scanning/alerts?state=open&per_page=100" --paginate \
+                -q '.[] | (.rule.security_severity_level // .rule.severity)' 2>/dev/null); then
+            cs=$(printf '%s' "$cs_lines" | jq -R -s 'split("\n") | map(select(length>0)) | group_by(.) | map({(.[0]): length}) | add // {}')
+          else
+            cs='"unavailable (code scanning is not enabled for this repository)"'
+          fi
+          jq -n --arg repo "$REPO" --argjson run "$latest_run" --argjson cs "$cs" \
+            '{repository: $repo, latest_ci_run: $run, code_scanning_open_by_severity: $cs}' > github-data.json
+          cat github-data.json
+
+      - name: Render prompt
+        id: prompt
+        env:
+          BIZ: ${{ inputs.biz }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          upper=$(printf '%s' "$BIZ" | tr '[:lower:]' '[:upper:]')
+          {
+            echo "prompt<<PROMPT_EOF"
+            sed -e "s/{BIZ大文字}/$upper/g" -e "s/{BIZ}/$BIZ/g" -e "s#yoshiki-doi/demo-biz-$BIZ#$REPO#g" .ci/reports/weekly-report.prompt.md
+            cat <<'ADDENDUM'
+
+          ## 実行環境の指定（GitHub Actions）
+
+          - `gh` コマンドは使えない。CI の結果と Code scanning の件数は、ワークスペースの `github-data.json` を読む。
+          - 完成したレポートは、ワークスペースの `report.md` に Write ツールで保存する（標準出力には出さない）。
+          ADDENDUM
+            echo "PROMPT_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Generate report with Claude Code
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          github_token: ${{ github.token }}
+          prompt: ${{ steps.prompt.outputs.prompt }}
+          claude_args: |
+            --model claude-sonnet-5-5
+            --max-turns 25
+            --mcp-config .ci/sysdig-mcp.json
+            --allowedTools "mcp__secure-mcp-server__list_zones,mcp__secure-mcp-server__list_runtime_scan_results,mcp__secure-mcp-server__count_runtime_events,mcp__secure-mcp-server__discover_runtime_event_field_values,Read,Write"
+
+      - name: Publish report
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          [ -s report.md ] || { echo "::error::report.md was not created"; exit 1; }
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "${SLACK_WEBHOOK_URL:-}" ]; then
+            .ci/reports/post-to-slack.sh report.md
+          else
+            echo "No SLACK_WEBHOOK_URL secret: skipped the Slack post"
+          fi
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-${{ inputs.biz }}
+          path: |
+            report.md
+            github-data.json
+          if-no-files-found: ignore
