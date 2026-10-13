@@ -1,0 +1,69 @@
+# Reusable CI for the demo-biz-* repositories: build, scan with sysdig-cli-scanner, push to ghcr.io.
+# Called from each repo's ci.yml; the caller job must grant `packages: write`.
+name: build-scan-push
+
+on:
+  workflow_call:
+    inputs:
+      image-name:
+        description: Image repository without tag, e.g. ghcr.io/qfour/demo-biz-a
+        type: string
+        required: true
+      stop-on-failed-policy-eval:
+        description: Fail the job (and skip the push) when the Sysdig policy evaluation fails
+        type: boolean
+        default: false
+      secure-api-url:
+        type: string
+        default: https://app.au1.sysdig.com   # AU1 region
+      upload-sarif:
+        description: Upload the SARIF report to GitHub code scanning (needs code scanning enabled on the repo)
+        type: boolean
+        default: false
+    secrets:
+      SECURE_API_TOKEN:
+        required: true
+
+jobs:
+  build-scan-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      security-events: write   # for upload-sarif
+    env:
+      IMAGE: ${{ inputs.image-name }}:${{ github.sha }}
+      IMAGE_LATEST: ${{ inputs.image-name }}:latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t "$IMAGE" -t "$IMAGE_LATEST" .
+      - name: Scan image
+        uses: sysdiglabs/scan-action@v6
+        with:
+          image-tag: ${{ env.IMAGE }}
+          sysdig-secure-token: ${{ secrets.SECURE_API_TOKEN }}
+          sysdig-secure-url: ${{ inputs.secure-api-url }}
+          stop-on-failed-policy-eval: ${{ inputs.stop-on-failed-policy-eval }}
+          stop-on-processing-error: true   # operational errors (bad token, network) always fail the job
+      - uses: actions/upload-artifact@v4
+        if: success() || failure()
+        with: {name: sysdig-scan, path: sarif.json, if-no-files-found: ignore}
+      - name: Upload SARIF report
+        if: (success() || failure()) && inputs.upload-sarif
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: ${{ github.workspace }}/sarif.json
+      # Push only from main so the cluster (and Sysdig runtime scanner) pulls from the registry.
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Push image
+        if: github.event_name == 'push'
+        run: |
+          docker push "$IMAGE"
+          docker push "$IMAGE_LATEST"
