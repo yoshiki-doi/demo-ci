@@ -160,8 +160,11 @@ jobs:
             --mcp-config .ci/sysdig-mcp-hosted.json --strict-mcp-config \
             --allowedTools "$allowed" \
             --disallowedTools "$denied" \
-            --output-format json > claude-result.json
+            --output-format stream-json --verbose > claude-transcript.jsonl
+          jq -s 'map(select(.type=="result")) | last' claude-transcript.jsonl > claude-result.json
           jq '{is_error, subtype, num_turns, duration_ms, total_cost_usd, result: (.result // "" | .[0:300])}' claude-result.json
+          echo "--- tools used (count)"
+          jq -r 'select(.type=="assistant") | .message.content[]? | select(.type=="tool_use") | .name + (if .name=="Skill" then " " + (.input.skill // .input.command // "") else "" end)' claude-transcript.jsonl | sort | uniq -c | sort -rn
           [ "$(jq -r '.is_error' claude-result.json)" = "false" ] || { echo "::error::Claude Code reported an error (see the result above)"; exit 1; }
 
       - name: Publish report
@@ -185,5 +188,6 @@ jobs:
             report.md
             github-data.json
             claude-result.json
+            claude-transcript.jsonl
             ${{ runner.temp }}/claude-execution-output.json
           if-no-files-found: ignore
