@@ -81,6 +81,20 @@ jobs:
             echo "PROMPT_EOF"
           } >> "$GITHUB_OUTPUT"
 
+      # Fail fast with a readable reason instead of a generic "Invalid API key" from the action.
+      # Prints only the length, the "sk-ant-" style prefix, whether whitespace sneaked in, and the HTTP status.
+      - name: Check ANTHROPIC_API_KEY
+        env:
+          KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then echo "::error::ANTHROPIC_API_KEY is empty or not set"; exit 1; fi
+          ws=no; case "$KEY" in *[[:space:]]*) ws=yes ;; esac
+          echo "length=${#KEY} prefix=${KEY:0:7} whitespace_inside=$ws"
+          code=$(curl -s -o /dev/null -w '%{http_code}' https://api.anthropic.com/v1/models \
+            -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01")
+          echo "Anthropic API status: $code"
+          [ "$code" = "200" ] || { echo "::error::ANTHROPIC_API_KEY was rejected (HTTP $code)"; exit 1; }
+
       - name: Generate report with Claude Code
         uses: anthropics/claude-code-action@v1
         with:
